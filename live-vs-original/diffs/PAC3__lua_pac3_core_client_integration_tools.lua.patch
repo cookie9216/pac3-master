@@ -1,0 +1,37 @@
+--- /tmp/tmp.aoqOpC7GAY/lua/pac3/core/client/integration_tools.lua	2026-05-06 23:34:10.000000000 +0000
++++ /home/cookie/gmod/serverfiles/garrysmod/addons/0020_pac3-master/lua/pac3/core/client/integration_tools.lua	2026-08-18 16:45:35.776550073 +0000
+@@ -6,18 +6,28 @@
+ 	local part_data = table.Copy(part_data)
+ 	base = base or tostring(part_data)
+ 
++	-- change by cookie9216
+ 	local function fixpart(part)
+-		for key, val in pairs(part.self) do
+-			if val ~= "" and (key == "UniqueID" or key:sub(-3) == "UID") then
+-				part.self[key] = pac.Hash(base .. val)
++		if not part then return end
++		if istable(part.self) then
++			for key, val in pairs(part.self) do
++				if val ~= "" and (key == "UniqueID" or key:sub(-3) == "UID") then
++					part.self[key] = pac.Hash(base .. val)
++				end
+ 			end
+ 		end
+-
+-		for _, part in pairs(part.children) do
+-			fixpart(part)
++		for _, child in pairs(part.children or {}) do
++			fixpart(child)
++		end
++		for key, child in pairs(part) do
++			if key ~= "self" and key ~= "children" and istable(child) then
++				fixpart(child)
++			end
+ 		end
+ 	end
+ 
++	fixpart(part_data)
++
+ 	return part_data
+ end
+ 

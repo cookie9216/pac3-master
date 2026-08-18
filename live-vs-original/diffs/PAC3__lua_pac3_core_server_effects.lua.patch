@@ -1,0 +1,61 @@
+--- /tmp/tmp.aoqOpC7GAY/lua/pac3/core/server/effects.lua	2026-05-06 23:34:10.000000000 +0000
++++ /home/cookie/gmod/serverfiles/garrysmod/addons/0020_pac3-master/lua/pac3/core/server/effects.lua	2026-08-18 16:45:35.797552062 +0000
+@@ -7,8 +7,16 @@
+ 	"citadel_shockwave",
+ 	"choreo_launch_rocket_start",
+ 	"choreo_launch_rocket_jet",
++	-- change by cookie9216
++	"impact_grass",
++	"impact_plastic",
+ }
+ 
++pac.EffectsBlackListLookup = {}
++for _, name in ipairs(pac.EffectsBlackList) do
++	pac.EffectsBlackListLookup[name] = true
++end
++
+ if not pac_loaded_particle_effects then
+ 	pac_loaded_particle_effects = {}
+ 	local files = file.Find("particles/*.pcf", "GAME")
+@@ -28,16 +36,21 @@
+ util.AddNetworkString("pac_request_precache")
+ 
+ function pac.PrecacheEffect(name)
++	-- change by cookie9216
++	if pac.EffectsBlackListLookup and pac.EffectsBlackListLookup[name] then return end
+ 	PrecacheParticleSystem(name)
+ 	net.Start("pac_effect_precached")
+ 	net.WriteString(name)
+ 	net.Broadcast()
+ end
+ 
++-- change by cookie9216
+ local queue = {}
+ net.Receive("pac_request_precache", function(len, pl)
++	if not IsValid(pl) or not pl:IsPlayer() then return end
+ 	local name = net.ReadString()
+-	if table.HasValue(pac.EffectsBlackList, name) then return end
++	if not isstring(name) or name == "" or #name > 128 then return end
++	if pac.EffectsBlackListLookup and pac.EffectsBlackListLookup[name] then return end
+ 
+ 	-- Each player gets a 50 length queue
+ 	local plqueue = queue[pl]
+@@ -47,6 +60,10 @@
+ 		plqueue = {name}
+ 		queue[pl] = plqueue
+ 		local function processQueue()
++			if not IsValid(pl) then
++				queue[pl] = nil
++				return
++			end
+ 			if #plqueue == 0 then
+ 				queue[pl] = nil
+ 			else
+@@ -57,3 +74,7 @@
+ 		processQueue()
+ 	end
+ end)
++
++hook.Add("PlayerDisconnected", "pac3_precache_queue_cleanup", function(pl)
++	queue[pl] = nil
++end)

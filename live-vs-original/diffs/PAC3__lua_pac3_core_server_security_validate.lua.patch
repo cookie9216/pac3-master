@@ -1,0 +1,355 @@
+--- /dev/null	2026-07-26 21:39:19.787270199 +0000
++++ /home/cookie/gmod/serverfiles/garrysmod/addons/0020_pac3-master/lua/pac3/core/server/security_validate.lua	2026-08-18 16:45:35.798552157 +0000
+@@ -0,0 +1,352 @@
++-- change by cookie9216
++
++if not SERVER then return end
++
++pac.Security = pac.Security or {}
++
++local wear_times = {}
++local validation_cache = {}
++local cache_count = 0
++local warned = {}
++
++local function cfg()
++	return pac.Security.Get()
++end
++
++local function phrase(owner, key, ...)
++	if pac.Security.Phrase then
++		return pac.Security.Phrase(key, owner, ...)
++	end
++	return key
++end
++
++
++local function notify_once(ply, key, msg)
++	if not pac.Security.GetBool("Policy", "NotifyBlocked", true) then return end
++	if not IsValid(ply) or not ply:IsPlayer() then return end
++	warned[ply] = warned[ply] or {}
++	local now = CurTime()
++	if (warned[ply][key] or 0) > now then return end
++	warned[ply][key] = now + 3
++	ply:ChatPrint("[PAC3] " .. tostring(msg))
++end
++
++local function log_blocked(ply, key, msg)
++	if not pac.Security.GetBool("Policy", "LogBlocked", true) then return end
++	if not IsValid(ply) then return end
++	warned[ply] = warned[ply] or {}
++	local now = CurTime()
++	local log_key = "log_" .. tostring(key or "generic")
++	if (warned[ply][log_key] or 0) > now then return end
++	warned[ply][log_key] = now + 8
++	MsgC(Color(255, 170, 90), "[PAC3] ", color_white,
++		string.format("Blocked (%s / %s): %s\n", ply:Nick() or "?", ply:SteamID() or "?", tostring(msg or "unknown")))
++end
++
++local function normalize_path(str)
++	if not isstring(str) then return "" end
++	str = string.gsub(str, "\\", "/")
++	str = string.lower(str)
++	return str
++end
++
++local function is_remote_or_invalid_path(str)
++	str = normalize_path(str)
++	if str == "" then return false end
++	if string.find(str, "https?://") then return true end
++	if string.find(str, "^data:") then return true end
++	if string.find(str, "^obj:") then return true end
++	if string.find(str, "^asset://") then return true end
++	if string.find(str, "^url:") then return true end
++	if string.find(str, "..", 1, true) then return true end
++	if string.find(str, "//", 1, true) then return true end
++	if string.find(str, "\n", 1, true) or string.find(str, "\r", 1, true) then return true end
++	return false
++end
++
++local function is_safe_model_path(str)
++	str = normalize_path(str)
++	if str == "" then return true end
++	if is_remote_or_invalid_path(str) then return false end
++	local maxLen = pac.Security.GetNumber("URL", "MaxLengthChars", 2048)
++	if #str > maxLen then return false end
++	if not string.find(str, "%.mdl$") then return false end
++	return string.find(str, "^models/") ~= nil
++end
++
++local function is_safe_material_path(str)
++	str = normalize_path(str)
++	if str == "" then return true end
++	if is_remote_or_invalid_path(str) then return false end
++	local maxLen = pac.Security.GetNumber("URL", "MaxLengthChars", 2048)
++	if #str > maxLen then return false end
++	return not string.find(str, "[:*?\"<>|]", 1)
++end
++
++local function split_semicolon_list(str)
++	if not isstring(str) or str == "" then return nil end
++	return string.Explode(";", str, false)
++end
++
++local function read_vec_component(vec, key, index, fallback)
++	if not istable(vec) then return fallback end
++	local val = vec[key]
++	if val == nil then val = vec[index] end
++	val = tonumber(val)
++	if val == nil then return fallback end
++	return val
++end
++
++local function validate_node(node, state, owner, depth)
++	if not istable(node) or not istable(node.self) then
++		return false, phrase(owner, "invalid_structure")
++	end
++
++	depth = depth or 1
++	state.max_depth_seen = math.max(state.max_depth_seen, depth)
++	if depth > state.max_depth then
++		return false, phrase(owner, "too_deep")
++	end
++
++	state.parts = state.parts + 1
++	if state.parts > state.max_parts then
++		return false, phrase(owner, "too_many_parts")
++	end
++
++	local class_name = string.lower(tostring(node.self.ClassName or ""))
++	if class_name == "" then
++		return false, phrase(owner, "missing_classname")
++	end
++
++	if pac.Security.IsBlockedPart(class_name) then
++		return false, phrase(owner, "part_disabled", class_name)
++	end
++
++	if state.restrict_to_safe_cosmetics and not pac.Security.IsSafePart(class_name) then
++		return false, phrase(owner, "part_not_safe", class_name)
++	end
++
++	local maxStr = pac.Security.GetNumber("Parts", "MaxStringLengthChars", 4096)
++
++	if class_name == "model" or class_name == "model2" then
++		state.model_parts = state.model_parts + 1
++		if state.model_parts > state.max_models then
++			return false, phrase(owner, "too_many_models")
++		end
++
++		if node.self.ForceObjUrl then
++			return false, phrase(owner, "obj_disabled")
++		end
++
++		if not is_safe_model_path(node.self.Model or "") then
++			return false, phrase(owner, "unsafe_model")
++		end
++
++		if not is_safe_material_path(node.self.Material or "") then
++			return false, phrase(owner, "unsafe_material")
++		end
++
++		local materials = split_semicolon_list(node.self.Materials)
++		if materials then
++			for _, mat in ipairs(materials) do
++				if mat ~= "" then
++					state.material_ops = state.material_ops + 1
++					if state.material_ops > state.max_material_ops then
++						return false, phrase(owner, "too_many_materials")
++					end
++					if not is_safe_material_path(mat) then
++						return false, phrase(owner, "unsafe_submaterial")
++					end
++				end
++			end
++		end
++
++		local model_modifiers = tostring(node.self.ModelModifiers or "")
++		if #model_modifiers > maxStr then
++			return false, phrase(owner, "modifier_too_long")
++		end
++		if model_modifiers ~= "" then
++			local lowered = string.lower(model_modifiers)
++			if string.find(lowered, "scale", 1, true) or string.find(lowered, "size", 1, true) then
++				if pac.Security.GetBool("Policy", "BlockPlayerResize", true) then
++					return false, phrase(owner, "scale_disabled")
++				end
++			end
++		end
++	elseif class_name == "material" or class_name == "submaterial" or string.sub(class_name, 1, 9) == "material_" then
++		state.material_ops = state.material_ops + 1
++		if state.material_ops > state.max_material_ops then
++			return false, phrase(owner, "too_many_materials")
++		end
++		if not is_safe_material_path(node.self.Material or "") then
++			return false, phrase(owner, "unsafe_material")
++		end
++	elseif class_name == "trail" or class_name == "trail2" then
++		state.trail_parts = state.trail_parts + 1
++		if state.trail_parts > state.max_trails then
++			return false, phrase(owner, "too_many_trails")
++		end
++		local trail_path = node.self.TrailPath or node.self.Material or ""
++		if not is_safe_material_path(trail_path) then
++			return false, phrase(owner, "unsafe_trail")
++		end
++		local start_size = tonumber(node.self.StartSize or 0) or 0
++		local end_size = tonumber(node.self.EndSize or 0) or 0
++		local maxSize = pac.Security.GetNumber("Parts", "TrailMaxSize", 48)
++		if start_size > maxSize or end_size > maxSize or start_size < 0 or end_size < 0 then
++			return false, phrase(owner, "trail_size")
++		end
++		local duration = tonumber(node.self.Duration or node.self.Length or 0) or 0
++		local maxDur = pac.Security.GetNumber("Parts", "TrailMaxDurationSeconds", 12)
++		if duration > maxDur or duration < 0 then
++			return false, phrase(owner, "trail_duration")
++		end
++	elseif class_name == "bodygroup" then
++		local idx = tonumber(node.self.ModelIndex or 0) or 0
++		local maxIdx = pac.Security.GetNumber("Parts", "BodygroupIndexMax", 64)
++		if idx < 0 or idx > maxIdx then
++			return false, phrase(owner, "bodygroup_index")
++		end
++		local bodygroup_name = tostring(node.self.BodyGroupName or "")
++		if #bodygroup_name > maxStr or bodygroup_name:find("\n", 1, true) or bodygroup_name:find("\r", 1, true) then
++			return false, phrase(owner, "bodygroup_name")
++		end
++	elseif class_name == "bone" then
++		state.bone_parts = (state.bone_parts or 0) + 1
++		if state.bone_parts > state.max_bones then
++			return false, phrase(owner, "too_many_bones")
++		end
++		local scale = node.self.Scale
++		if istable(scale) then
++			local x = read_vec_component(scale, "x", 1, 1)
++			local y = read_vec_component(scale, "y", 2, 1)
++			local z = read_vec_component(scale, "z", 3, 1)
++			local minS = pac.Security.GetNumber("Parts", "BoneScaleMin", 0.2)
++			local maxS = pac.Security.GetNumber("Parts", "BoneScaleMax", 3)
++			if x > maxS or y > maxS or z > maxS or x < minS or y < minS or z < minS then
++				return false, phrase(owner, "bone_scale")
++			end
++		end
++	end
++
++	local owner_name = tostring(node.self.OwnerName or "")
++	if owner_name ~= "" then
++		local numeric_owner = tonumber(owner_name)
++		if numeric_owner and IsValid(owner) and owner:EntIndex() ~= numeric_owner then
++			return false, phrase(owner, "foreign_entity")
++		end
++	end
++
++	if istable(node.children) then
++		for _, child in pairs(node.children) do
++			local ok, reason = validate_node(child, state, owner, depth + 1)
++			if ok == false then
++				return false, reason
++			end
++		end
++	end
++
++	return true
++end
++
++function pac.Security.ValidateOutfit(owner, data)
++	if not IsValid(owner) or not owner:IsPlayer() then
++		return false, phrase(owner, "invalid_owner")
++	end
++	if not istable(data) then
++		return false, phrase(owner, "invalid_data")
++	end
++	if not istable(data.part) then
++		return false, phrase(owner, "invalid_transfer")
++	end
++
++	if not pac.Security.LimitsEnabled() then
++		return true
++	end
++
++	local payload = util.TableToJSON(data) or ""
++	local max_bytes = pac.Security.GetNumber("Network", "MaxPayloadBytes", 262144)
++	if #payload > max_bytes then
++		return false, phrase(owner, "too_large")
++	end
++
++	local sid = owner:SteamID64() or "0"
++	local cache_key = sid .. ":" .. util.CRC(payload)
++	local cached = validation_cache[cache_key]
++	if cached then
++		if cached.expires > CurTime() then
++			return cached.ok, cached.reason
++		end
++		validation_cache[cache_key] = nil
++		cache_count = math.max(0, cache_count - 1)
++	end
++
++	local parts = cfg().Parts
++	local state = {
++		parts = 0,
++		model_parts = 0,
++		material_ops = 0,
++		trail_parts = 0,
++		bone_parts = 0,
++		max_depth_seen = 0,
++		max_parts = tonumber(parts.MaxPartsCount) or 64,
++		max_depth = tonumber(parts.MaxDepthCount) or 12,
++		max_models = tonumber(parts.MaxModelsCount) or 24,
++		max_material_ops = tonumber(parts.MaxMaterialOpsCount) or 48,
++		max_trails = tonumber(parts.MaxTrailsCount) or 6,
++		max_bones = tonumber(parts.MaxBonesCount) or 32,
++		restrict_to_safe_cosmetics = pac.Security.GetBool("Policy", "RestrictToSafeCosmetics", true),
++	}
++
++	local ok, reason = validate_node(data.part, state, owner, 1)
++
++	local ttl = pac.Security.GetNumber("Cache", "ValidationTtlSeconds", 45)
++	local maxEntries = pac.Security.GetNumber("Cache", "ValidationMaxEntries", 256)
++	if cache_count >= maxEntries then
++		validation_cache = {}
++		cache_count = 0
++	end
++	validation_cache[cache_key] = {
++		ok = ok,
++		reason = reason,
++		expires = CurTime() + ttl,
++	}
++	cache_count = cache_count + 1
++
++	return ok, reason
++end
++
++function pac.Security.CheckWearCooldown(owner)
++	if not pac.Security.LimitsEnabled() then
++		return true
++	end
++	if not IsValid(owner) then
++		return false, phrase(owner, "invalid_owner")
++	end
++	local now = CurTime()
++	local sid = owner:SteamID64() or owner:SteamID() or tostring(owner:EntIndex())
++	local cooldown = pac.Security.GetNumber("Network", "WearCooldownSeconds", 2)
++	if (wear_times[sid] or 0) + cooldown > now then
++		return false, phrase(owner, "wear_cooldown")
++	end
++	wear_times[sid] = now
++	return true
++end
++
++function pac.Security.NotifyBlocked(owner, key, msg)
++	notify_once(owner, key, msg)
++	log_blocked(owner, key, msg)
++end
++
++function pac.Security.ClearPlayerState(ply)
++	warned[ply] = nil
++	if IsValid(ply) then
++		local sid = ply:SteamID64() or ply:SteamID()
++		if sid then wear_times[sid] = nil end
++	end
++end
++
++hook.Add("PlayerDisconnected", "pac3_security_cleanup", function(ply)
++	pac.Security.ClearPlayerState(ply)
++end)
++

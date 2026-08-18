@@ -1,0 +1,37 @@
+--- /tmp/tmp.aoqOpC7GAY/lua/pac3/core/client/part_pool.lua	2026-05-06 23:34:10.000000000 +0000
++++ /home/cookie/gmod/serverfiles/garrysmod/addons/0020_pac3-master/lua/pac3/core/client/part_pool.lua	2026-08-18 16:45:35.777550168 +0000
+@@ -33,6 +33,16 @@
+ 	end)
+ end
+ 
++-- change by cookie9216
++local function pac_ShouldHideRagdoll(rag)
++	if pac.Security and pac.Security.KeepTTTCorpsesVisible and pac.Security.KeepTTTCorpsesVisible() then
++		if pac.Security.IsTTTPlayerCorpse(rag) then
++			return false
++		end
++	end
++	return true
++end
++
+ function pac.ForceRendering(b)
+ 	force_rendering = b
+ 	if b then
+@@ -840,6 +850,8 @@
+ 					local rag = ply.pac_ragdoll
+ 
+ 					if IsValid(rag) and (ply.pac_death_hide_ragdoll or ply.pac_draw_player_on_death) then
++						-- change by cookie9216
++						if pac_ShouldHideRagdoll(rag) then
+ 						rag:SetRenderMode(RENDERMODE_TRANSALPHA)
+ 
+ 						local c = rag:GetColor()
+@@ -854,6 +866,8 @@
+ 						if ply.pac_draw_player_on_death then
+ 							ply:DrawModel()
+ 						end
++						-- change by cookie9216
++						end
+ 					end
+ 
+ 					if radius < 32 then

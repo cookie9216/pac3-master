@@ -1,0 +1,12 @@
+--- /tmp/tmp.aoqOpC7GAY/lua/pac3/core/client/parts/effect.lua	2026-05-06 23:34:10.000000000 +0000
++++ /home/cookie/gmod/serverfiles/garrysmod/addons/0020_pac3-master/lua/pac3/core/client/parts/effect.lua	2026-08-18 16:45:35.781550547 +0000
+@@ -77,6 +77,9 @@
+ local alreadyServer = {}
+ local function pac_request_precache(name)
+ 	if already[name] then return end
++	-- change by cookie9216
++	if (pac.EffectsBlackListLookup and pac.EffectsBlackListLookup[name])
++		or name == "impact_grass" or name == "impact_plastic" then return end
+ 	already[name] = true
+ 	PrecacheParticleSystem(name)
+ 	net.Start("pac_request_precache")

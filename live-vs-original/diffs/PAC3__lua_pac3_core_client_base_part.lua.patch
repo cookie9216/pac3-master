@@ -1,0 +1,24 @@
+--- /tmp/tmp.aoqOpC7GAY/lua/pac3/core/client/base_part.lua	2026-05-06 23:34:10.000000000 +0000
++++ /home/cookie/gmod/serverfiles/garrysmod/addons/0020_pac3-master/lua/pac3/core/client/base_part.lua	2026-08-18 16:45:35.774549884 +0000
+@@ -13,6 +13,9 @@
+ local NULL = NULL
+ local table_insert = table.insert
+ 
++-- change by cookie9216
++local warn_unique_id_collisions = CreateClientConVar("pac_warn_unique_id_collisions", "0", true, false, "Print a message when PAC UniqueIDs collide")
++
+ local BUILDER, PART = pac.PartTemplate()
+ 
+ PART.ClassName = "base"
+@@ -123,7 +126,10 @@
+ 		local existing = pac.GetPartFromUniqueID(self:GetPlayerOwnerId(), id)
+ 
+ 		if existing:IsValid() then
+-			pac.Message(Color(255, 50, 50), "unique id collision between ", self, " and ", existing)
++			-- change by cookie9216
++			if warn_unique_id_collisions:GetBool() then
++				pac.Message(Color(255, 50, 50), "unique id collision between ", self, " and ", existing)
++			end
+ 			id = nil
+ 		end
+ 	end

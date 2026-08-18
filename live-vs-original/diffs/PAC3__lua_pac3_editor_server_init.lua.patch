@@ -1,0 +1,34 @@
+--- /tmp/tmp.aoqOpC7GAY/lua/pac3/editor/server/init.lua	2026-05-06 23:34:10.000000000 +0000
++++ /home/cookie/gmod/serverfiles/garrysmod/addons/0020_pac3-master/lua/pac3/editor/server/init.lua	2026-08-18 16:45:35.836555757 +0000
+@@ -29,6 +29,15 @@
+ 		return false
+ 	end
+ 
++	-- change by cookie9216
++	local hookResult = hook.Run("PACCanPlayerModify", ply, ent)
++	if hookResult == false then
++		return false
++	end
++	if hookResult == true then
++		return true
++	end
++
+ 	if ply == ent then
+ 		return true
+ 	end
+@@ -78,7 +87,14 @@
+ 	util.AddNetworkString("pac_in_editor")
+ 
+ 	net.Receive("pac_in_editor", function(_, ply)
+-		ply:SetNW2Bool("pac_in_editor", net.ReadBit() == 1)
++		-- change by cookie9216
++		if not IsValid(ply) or not ply:IsPlayer() then return end
++		local want = net.ReadBit() == 1
++		if want and pac.Security and pac.Security.PlayerCanOpenEditor and not pac.Security.PlayerCanOpenEditor(ply) then
++			ply:SetNW2Bool("pac_in_editor", false)
++			return
++		end
++		ply:SetNW2Bool("pac_in_editor", want)
+ 	end)
+ 
+ 	util.AddNetworkString("pac_in_editor_posang")

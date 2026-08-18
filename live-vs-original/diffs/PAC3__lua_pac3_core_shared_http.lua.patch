@@ -1,0 +1,19 @@
+--- /tmp/tmp.aoqOpC7GAY/lua/pac3/core/shared/http.lua	2026-05-06 23:34:10.000000000 +0000
++++ /home/cookie/gmod/serverfiles/garrysmod/addons/0020_pac3-master/lua/pac3/core/shared/http.lua	2026-08-18 16:45:35.800552347 +0000
+@@ -172,6 +172,16 @@
+ 		return
+ 	end
+ 
++	-- change by cookie9216
++	if pac.Security and pac.Security.GetBool("URL", "Enabled", true) then
++		local maxLen = pac.Security.GetNumber("URL", "MaxLengthChars", 2048)
++		if url:len() > maxLen then
++			local msg = pac.Security.Phrase and pac.Security.Phrase("url_too_long") or "url length exceeds MaxLengthChars"
++			failcb(msg .. " (" .. tostring(maxLen) .. ")", true)
++			return
++		end
++	end
++
+ 	url = pac.FixUrl(url)
+ 
+ 	local limit = SV_LIMIT:GetInt()
