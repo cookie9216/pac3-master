@@ -1,0 +1,420 @@
+-- change by cookie9216
+
+pac.Security = pac.Security or {}
+
+local DEFAULTS = {
+	Enabled = true,
+	Network = {
+		Enabled = true,
+		MaxPayloadBytes = 262144,
+		MaxRequestsPerWindow = 8,
+		WindowSeconds = 5,
+		WearCooldownSeconds = 2,
+		MinSubmitLength = 64,
+	},
+	Parts = {
+		MaxPartsCount = 64,
+		MaxDepthCount = 12,
+		MaxModelsCount = 24,
+		MaxMaterialOpsCount = 48,
+		MaxTrailsCount = 6,
+		MaxBonesCount = 32,
+		MaxStringLengthChars = 4096,
+		TrailMaxSize = 48,
+		TrailMaxDurationSeconds = 12,
+		BoneScaleMin = 0.2,
+		BoneScaleMax = 3,
+		BodygroupIndexMax = 64,
+	},
+	URL = {
+		Enabled = true,
+		MaxLengthChars = 2048,
+		BlockRemoteModelUrls = true,
+	},
+	Policy = {
+		RestrictToSafeCosmetics = true,
+		BlockPlayerModelRewrite = true,
+		BlockPlayerResize = true,
+		ForceDisableCombat = true,
+		ForceDisableMovement = true,
+		ForceDisablePropOutfits = true,
+		NotifyBlocked = true,
+		LogBlocked = true,
+	},
+	Editor = {
+		RestrictOpen = true,
+		PrivilegeName = "pac3.open_editor",
+		AllowSuperAdmin = true,
+	},
+	Compatibility = {
+		KeepTTTCorpsesVisible = true,
+	},
+	SafeParts = {
+		group = true,
+		model = true,
+		model2 = true,
+		bone = true,
+		bodygroup = true,
+		material = true,
+		submaterial = true,
+		trail2 = true,
+	},
+	BlockedParts = {},
+	Cache = {
+		ValidationTtlSeconds = 45,
+		ValidationMaxEntries = 256,
+	},
+}
+
+local LIMITS = {
+	Network = {
+		MaxPayloadBytes = {min = 8192, max = 8388608},
+		MaxRequestsPerWindow = {min = 1, max = 120},
+		WindowSeconds = {min = 1, max = 60},
+		WearCooldownSeconds = {min = 0.25, max = 30},
+		MinSubmitLength = {min = 16, max = 4096},
+	},
+	Parts = {
+		MaxPartsCount = {min = 8, max = 2048},
+		MaxDepthCount = {min = 2, max = 128},
+		MaxModelsCount = {min = 1, max = 512},
+		MaxMaterialOpsCount = {min = 1, max = 1024},
+		MaxTrailsCount = {min = 0, max = 64},
+		MaxBonesCount = {min = 0, max = 256},
+		MaxStringLengthChars = {min = 32, max = 65536},
+		TrailMaxSize = {min = 1, max = 256},
+		TrailMaxDurationSeconds = {min = 0.1, max = 60},
+		BoneScaleMin = {min = 0.01, max = 1},
+		BoneScaleMax = {min = 1, max = 16},
+		BodygroupIndexMax = {min = 1, max = 256},
+	},
+	URL = {
+		MaxLengthChars = {min = 64, max = 8192},
+	},
+	Cache = {
+		ValidationTtlSeconds = {min = 5, max = 300},
+		ValidationMaxEntries = {min = 16, max = 4096},
+	},
+}
+
+local function copyDefaults()
+	return table.Copy(DEFAULTS)
+end
+
+local function asBool(val, fallback)
+	if isbool(val) then return val end
+	if val == 1 or val == "1" or val == "true" then return true end
+	if val == 0 or val == "0" or val == "false" then return false end
+	return fallback
+end
+
+local function asNumber(val, fallback, minv, maxv)
+	local n = tonumber(val)
+	if n == nil or n ~= n then
+		return fallback
+	end
+	if minv and n < minv then n = minv end
+	if maxv and n > maxv then n = maxv end
+	return n
+end
+
+local function asString(val, fallback)
+	if isstring(val) and val ~= "" then return val end
+	return fallback
+end
+
+local function mergeSection(dst, src, defaults, limits)
+	if not istable(src) then
+		return
+	end
+	for key, def in pairs(defaults) do
+		local incoming = src[key]
+		if isbool(def) then
+			dst[key] = asBool(incoming, def)
+		elseif isnumber(def) then
+			local lim = limits and limits[key]
+			dst[key] = asNumber(incoming, def, lim and lim.min, lim and lim.max)
+		elseif isstring(def) then
+			dst[key] = asString(incoming, def)
+		elseif istable(def) then
+			if istable(incoming) then
+				dst[key] = incoming
+			end
+		end
+	end
+end
+
+local function loadConfigFile()
+	local compiled = CompileFile("pac3/core/shared/security_config.lua")
+	if not compiled then
+		return false
+	end
+	local ok = pcall(compiled)
+	return ok == true
+end
+
+local function validateAndApply()
+	local cfg = copyDefaults()
+	loadConfigFile()
+	local raw = PAC3_SECURITY
+	if istable(raw) then
+		cfg.Enabled = asBool(raw.Enabled, cfg.Enabled)
+		mergeSection(cfg.Network, raw.Network, DEFAULTS.Network, LIMITS.Network)
+		mergeSection(cfg.Parts, raw.Parts, DEFAULTS.Parts, LIMITS.Parts)
+		mergeSection(cfg.URL, raw.URL, DEFAULTS.URL, LIMITS.URL)
+		mergeSection(cfg.Policy, raw.Policy, DEFAULTS.Policy, nil)
+		mergeSection(cfg.Editor, raw.Editor, DEFAULTS.Editor, nil)
+		mergeSection(cfg.Compatibility, raw.Compatibility, DEFAULTS.Compatibility, nil)
+		mergeSection(cfg.Cache, raw.Cache, DEFAULTS.Cache, LIMITS.Cache)
+		if istable(raw.SafeParts) then
+			cfg.SafeParts = raw.SafeParts
+		end
+		if istable(raw.BlockedParts) then
+			cfg.BlockedParts = raw.BlockedParts
+		end
+	end
+
+	local cv = GetConVar("pac_security_enabled")
+	if cv then
+		cfg.Enabled = cv:GetBool()
+	end
+
+	PAC3_SECURITY = cfg
+	pac.Security._cfg = cfg
+end
+
+if SERVER then
+	CreateConVar("pac_security_enabled", "1", {FCVAR_ARCHIVE, FCVAR_NOTIFY, FCVAR_REPLICATED}, "Enable PAC3 configurable security limits and policy (structural validation always stays on)")
+end
+
+validateAndApply()
+
+if SERVER then
+	cvars.AddChangeCallback("pac_security_enabled", function()
+		if pac.Security._cfg then
+			local cv = GetConVar("pac_security_enabled")
+			if cv then
+				pac.Security._cfg.Enabled = cv:GetBool()
+				if istable(PAC3_SECURITY) then
+					PAC3_SECURITY.Enabled = pac.Security._cfg.Enabled
+				end
+			end
+		end
+	end, "pac3_security_enabled")
+end
+
+function pac.Security.Get()
+	return pac.Security._cfg or PAC3_SECURITY or DEFAULTS
+end
+
+function pac.Security.LimitsEnabled()
+	local cfg = pac.Security.Get()
+	return cfg.Enabled ~= false
+end
+
+function pac.Security.GetBool(section, key, fallback)
+	local cfg = pac.Security.Get()
+	local grp = cfg[section]
+	if istable(grp) and grp[key] ~= nil then
+		return asBool(grp[key], fallback)
+	end
+	return fallback
+end
+
+function pac.Security.GetNumber(section, key, fallback)
+	local cfg = pac.Security.Get()
+	local grp = cfg[section]
+	if istable(grp) then
+		return asNumber(grp[key], fallback)
+	end
+	return fallback
+end
+
+function pac.Security.GetString(section, key, fallback)
+	local cfg = pac.Security.Get()
+	local grp = cfg[section]
+	if istable(grp) then
+		return asString(grp[key], fallback)
+	end
+	return fallback
+end
+
+function pac.Security.IsSafePart(className)
+	if not isstring(className) or className == "" then
+		return false
+	end
+	local cfg = pac.Security.Get()
+	if cfg.SafeParts and cfg.SafeParts[className] then
+		return true
+	end
+	if string.sub(className, 1, 9) == "material_" then
+		return true
+	end
+	return false
+end
+
+function pac.Security.IsBlockedPart(className)
+	local cfg = pac.Security.Get()
+	return istable(cfg.BlockedParts) and cfg.BlockedParts[className] == true
+end
+
+function pac.Security.PlayerCanOpenEditor(ply)
+	if not IsValid(ply) or not ply:IsPlayer() then
+		return false
+	end
+
+	if not pac.Security.LimitsEnabled() or not pac.Security.GetBool("Editor", "RestrictOpen", true) then
+		return true
+	end
+
+	if pac.Security.GetBool("Editor", "AllowSuperAdmin", true) and ply:IsSuperAdmin() then
+		return true
+	end
+
+	local privilege = pac.Security.GetString("Editor", "PrivilegeName", "pac3.open_editor")
+
+	if ULib and ULib.ucl and ULib.ucl.query and ULib.ucl.query(ply, privilege) then
+		return true
+	end
+
+	if CAMI and CAMI.PlayerHasAccess then
+		local allowed
+		CAMI.PlayerHasAccess(ply, privilege, function(ok)
+			allowed = ok and true or false
+		end)
+		if allowed then
+			return true
+		end
+	end
+
+	return false
+end
+
+function pac.Security.IsTTTActive()
+	if CORPSE then
+		return true
+	end
+	local gm = engine.ActiveGamemode and engine.ActiveGamemode() or ""
+	if isstring(gm) and string.find(string.lower(gm), "terrortown", 1, true) then
+		return true
+	end
+	return false
+end
+
+function pac.Security.KeepTTTCorpsesVisible()
+	return pac.Security.GetBool("Compatibility", "KeepTTTCorpsesVisible", true) and pac.Security.IsTTTActive()
+end
+
+function pac.Security.UseGerman(ply)
+	local lang = "en"
+	if CLIENT then
+		local cv = GetConVar("gmod_language")
+		if cv then
+			lang = cv:GetString() or "en"
+		end
+	elseif IsValid(ply) and ply.GetInfo then
+		lang = ply:GetInfo("gmod_language") or "en"
+	end
+	lang = string.lower(tostring(lang or "en"))
+	return lang == "de" or string.sub(lang, 1, 3) == "de-"
+end
+
+local PHRASES_EN = {
+	invalid_owner = "Invalid PAC owner.",
+	invalid_data = "Invalid PAC data.",
+	invalid_transfer = "Invalid PAC transfer.",
+	invalid_structure = "Invalid PAC data structure.",
+	too_deep = "Outfit nesting is too deep.",
+	too_many_parts = "Outfit has too many parts.",
+	missing_classname = "Part is missing ClassName.",
+	part_disabled = "Part type '%s' is disabled.",
+	part_not_safe = "Part type '%s' is not allowed for safe cosmetics.",
+	too_many_models = "Outfit has too many model parts.",
+	obj_disabled = "OBJ/remote models are disabled.",
+	unsafe_model = "Unsafe or remote model path.",
+	unsafe_material = "Unsafe material path.",
+	too_many_materials = "Too many material changes.",
+	unsafe_submaterial = "Unsafe submaterial path.",
+	modifier_too_long = "Model modifier string is too long.",
+	scale_disabled = "Model scale/size modifiers are disabled.",
+	too_many_trails = "Too many trail parts.",
+	unsafe_trail = "Unsafe trail material path.",
+	trail_size = "Trail size is outside the allowed range.",
+	trail_duration = "Trail duration is outside the allowed range.",
+	bodygroup_index = "Invalid bodygroup index.",
+	bodygroup_name = "Invalid bodygroup name.",
+	too_many_bones = "Too many bone parts.",
+	bone_scale = "Bone scale is outside the allowed range.",
+	foreign_entity = "Outfit cannot be applied to foreign entities.",
+	too_large = "Outfit is too large.",
+	wear_cooldown = "Outfit apply cooldown is active.",
+	url_too_long = "url length exceeds MaxLengthChars",
+	editor_restricted = "PAC3 editor is restricted. Required access: %s",
+	movement_blocked = "PAC3 movement changes are disabled.",
+	remote_model_url = "Remote model URLs are disabled.",
+	player_model_rewrite = "PAC3 player model changes are disabled.",
+	player_resize = "PAC3 player resizing is disabled.",
+}
+
+local PHRASES_DE = {
+	invalid_owner = "Ungültiger PAC-Besitzer.",
+	invalid_data = "Ungültige PAC-Daten.",
+	invalid_transfer = "Ungültige PAC-Übertragung.",
+	invalid_structure = "Ungültige PAC-Datenstruktur.",
+	too_deep = "Outfit zu tief verschachtelt.",
+	too_many_parts = "Outfit hat zu viele Teile.",
+	missing_classname = "Teil ohne ClassName erkannt.",
+	part_disabled = "Teiltyp '%s' ist deaktiviert.",
+	part_not_safe = "Teiltyp '%s' ist nicht für sichere Kosmetik freigegeben.",
+	too_many_models = "Outfit hat zu viele Model-Teile.",
+	obj_disabled = "OBJ-/Remote-Modelle sind deaktiviert.",
+	unsafe_model = "Unsicherer oder externer Model-Pfad erkannt.",
+	unsafe_material = "Unsicherer Material-Pfad erkannt.",
+	too_many_materials = "Zu viele Material-Änderungen im Outfit.",
+	unsafe_submaterial = "Unsicherer Submaterial-Pfad erkannt.",
+	modifier_too_long = "Model-Modifier-Text ist zu lang.",
+	scale_disabled = "Model-Scale/Size-Modifier sind deaktiviert.",
+	too_many_trails = "Zu viele Trail-Teile im Outfit.",
+	unsafe_trail = "Unsicherer Trail-Material-Pfad erkannt.",
+	trail_size = "Trail-Größe ist außerhalb des sicheren Bereichs.",
+	trail_duration = "Trail-Dauer ist außerhalb des sicheren Bereichs.",
+	bodygroup_index = "Ungültiger Bodygroup-Index erkannt.",
+	bodygroup_name = "Ungültiger Bodygroup-Name erkannt.",
+	too_many_bones = "Zu viele Bone-Teile im Outfit.",
+	bone_scale = "Bone-Skalierung ist außerhalb des erlaubten Bereichs.",
+	foreign_entity = "Outfit darf nicht auf fremde Entities angewendet werden.",
+	too_large = "Outfit ist zu groß.",
+	wear_cooldown = "Outfit-Cooldown aktiv.",
+	url_too_long = "URL-Länge überschreitet MaxLengthChars",
+	editor_restricted = "PAC3-Editor ist gesperrt. Erforderliches Recht: %s",
+	movement_blocked = "PAC3-Bewegungsänderungen sind deaktiviert.",
+	remote_model_url = "Remote-Model-URLs sind deaktiviert.",
+	player_model_rewrite = "Playermodel-Änderungen über PAC3 sind deaktiviert.",
+	player_resize = "Spieler-Skalierung über PAC3 ist deaktiviert.",
+}
+
+function pac.Security.Phrase(key, ply, ...)
+	local tableForLang = pac.Security.UseGerman(ply) and PHRASES_DE or PHRASES_EN
+	local msg = tableForLang[key] or PHRASES_EN[key] or tostring(key)
+	if select("#", ...) > 0 then
+		return string.format(msg, ...)
+	end
+	return msg
+end
+
+function pac.Security.IsTTTPlayerCorpse(rag)
+	if not IsValid(rag) or rag:GetClass() ~= "prop_ragdoll" then
+		return false
+	end
+	if CORPSE and CORPSE.GetPlayerNick then
+		local nick = CORPSE.GetPlayerNick(rag, false)
+		if nick and nick ~= false and nick ~= "" then
+			return true
+		end
+	end
+	if rag.GetNWString and rag:GetNWString("nick", "") ~= "" then
+		return true
+	end
+	return false
+end
+

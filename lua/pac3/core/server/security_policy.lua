@@ -1,0 +1,153 @@
+-- change by cookie9216
+
+if not SERVER then return end
+
+local function set_cvar(name, value)
+	local cv = GetConVar(name)
+	if not cv then return end
+	local target = tostring(value)
+	if cv:GetString() ~= target then
+		cv:SetString(target)
+	end
+end
+
+local function clear_pac_movement(ply)
+	if not IsValid(ply) then return end
+	ply.pac_movement = nil
+	ply.scale_mass = 1
+	local phys = ply:GetPhysicsObject()
+	if IsValid(phys) then
+		phys:SetMass(85)
+	end
+end
+
+local function block_pac_movement_net()
+	if not pac.Security.LimitsEnabled() then return end
+	if not pac.Security.GetBool("Policy", "ForceDisableMovement", true) then return end
+
+	net.Receive("pac_modify_movement", function(_, ply)
+		if not IsValid(ply) or not ply:IsPlayer() then return end
+		clear_pac_movement(ply)
+		pac.Security.NotifyBlocked(ply, "movement_net", pac.Security.Phrase("movement_blocked", ply))
+	end)
+end
+
+local function apply_policy()
+	if not pac.Security.LimitsEnabled() then return end
+
+	if pac.Security.GetBool("Policy", "BlockPlayerModelRewrite", true) then
+		set_cvar("pac_modifier_model", 0)
+	end
+	if pac.Security.GetBool("Policy", "BlockPlayerResize", true) then
+		set_cvar("pac_modifier_size", 0)
+	end
+	if pac.Security.GetBool("URL", "BlockRemoteModelUrls", true) then
+		set_cvar("pac_allow_mdl", 0)
+		set_cvar("pac_allow_mdl_entity", 0)
+		set_cvar("sv_pac_webcontent_allow_no_content_length", 0)
+	end
+	if pac.Security.GetBool("Policy", "ForceDisablePropOutfits", true) then
+		set_cvar("pac_sv_prop_outfits", 0)
+	end
+
+	set_cvar("pac_submit_spam", 1)
+	set_cvar("pac_submit_limit", tostring(math.floor(pac.Security.GetNumber("Network", "MaxRequestsPerWindow", 8))))
+
+	if pac.Security.GetBool("Policy", "ForceDisableCombat", true) then
+		set_cvar("pac_to_contraption_allow", 0)
+		set_cvar("pac_sv_projectiles", 0)
+		set_cvar("pac_sv_projectile_allow_custom_collision_mesh", 0)
+		set_cvar("pac_sv_health_modifier", 0)
+		set_cvar("pac_sv_health_modifier_allow_maxhp", 0)
+		set_cvar("pac_sv_health_modifier_extra_bars", 0)
+		set_cvar("pac_sv_damage_zone", 0)
+		set_cvar("pac_sv_damage_zone_allow_dissolve", 0)
+		set_cvar("pac_sv_damage_zone_allow_ragdoll_hitparts", 0)
+		set_cvar("pac_sv_force", 0)
+		set_cvar("pac_sv_hitscan", 0)
+		set_cvar("pac_sv_lock", 0)
+		set_cvar("pac_sv_lock_teleport", 0)
+		set_cvar("pac_sv_lock_grab", 0)
+		set_cvar("pac_sv_lock_aim", 0)
+		set_cvar("pac_sv_lock_allow_grab_ply", 0)
+		set_cvar("pac_sv_lock_allow_grab_npc", 0)
+		set_cvar("pac_sv_lock_allow_grab_ent", 0)
+		set_cvar("pac_sv_nearest_life", 0)
+		set_cvar("pac_sv_nearest_life_allow_sampling_from_parts", 0)
+		set_cvar("pac_sv_nearest_life_allow_bones", 0)
+		set_cvar("pac_sv_nearest_life_allow_targeting_players", 0)
+		set_cvar("pac_sv_block_combat_features_on_next_restart", 2)
+		set_cvar("pac_sv_combat_whitelisting", 1)
+		set_cvar("pac_sv_combat_enforce_netrate", 250)
+		set_cvar("pac_sv_combat_enforce_netrate_buffersize", 8)
+		set_cvar("pac_sv_combat_distance_enforced", 1024)
+		set_cvar("pac_sv_combat_enforce_netrate_monitor_serverside", 0)
+	end
+
+	if pac.Security.GetBool("Policy", "ForceDisableMovement", true) then
+		set_cvar("pac_player_movement_allow_mass", 0)
+		set_cvar("pac_free_movement", 0)
+		block_pac_movement_net()
+	end
+end
+
+local function register_editor_privilege()
+	local privilege = pac.Security.GetString("Editor", "PrivilegeName", "pac3.open_editor")
+	if ULib and ULib.ucl and ULib.ucl.registerAccess then
+		ULib.ucl.registerAccess(privilege, ULib.ACCESS_SUPERADMIN, "Open the PAC3 editor.", "PAC3")
+	end
+	if CAMI and CAMI.RegisterPrivilege then
+		CAMI.RegisterPrivilege({
+			Name = privilege,
+			MinAccess = "superadmin",
+			Description = "Open the PAC3 editor.",
+		})
+	end
+end
+
+hook.Add("Initialize", "pac3_security_policy_init", function()
+	register_editor_privilege()
+	apply_policy()
+end)
+hook.Add("InitPostEntity", "pac3_security_policy_post", apply_policy)
+
+timer.Simple(0, apply_policy)
+timer.Simple(1, apply_policy)
+timer.Simple(5, apply_policy)
+
+hook.Add("PACMutateEntity", "pac3_security_block_mutations", function(owner, ent, class_name, ...)
+	if not pac.Security.LimitsEnabled() then return end
+	if not IsValid(owner) then return end
+
+	if class_name == "model" then
+		local path = ...
+		if pac.Security.GetBool("URL", "BlockRemoteModelUrls", true) and isstring(path) and string.find(path, "^https?://") then
+			pac.Security.NotifyBlocked(owner, "remote_model_url", pac.Security.Phrase("remote_model_url", owner))
+			return false
+		end
+		if pac.Security.GetBool("Policy", "BlockPlayerModelRewrite", true) and IsValid(ent) and ent:IsPlayer() then
+			pac.Security.NotifyBlocked(owner, "player_model_rewrite", pac.Security.Phrase("player_model_rewrite", owner))
+			return false
+		end
+	end
+
+	if class_name == "size" and pac.Security.GetBool("Policy", "BlockPlayerResize", true) and IsValid(ent) and ent:IsPlayer() then
+		pac.Security.NotifyBlocked(owner, "player_resize", pac.Security.Phrase("player_resize", owner))
+		return false
+	end
+end)
+
+hook.Add("PACCanPlayerModify", "pac3_security_foreign_entity", function(ply, ent)
+	if not pac.Security.LimitsEnabled() then return end
+	if not pac.Security.GetBool("Policy", "ForceDisablePropOutfits", true) then return end
+	if not IsValid(ply) or not IsValid(ent) then return false end
+	if ply == ent then return true end
+	return false
+end)
+
+hook.Add("PlayerSpawn", "pac3_security_clear_movement", function(ply)
+	if pac.Security.GetBool("Policy", "ForceDisableMovement", true) then
+		clear_pac_movement(ply)
+	end
+end)
+
