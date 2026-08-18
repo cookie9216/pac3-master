@@ -7,16 +7,21 @@ function pac.GenerateNewUniqueID(part_data, base)
 	base = base or tostring(part_data)
 
 	local function fixpart(part)
-		for key, val in pairs(part.self) do
-			if val ~= "" and (key == "UniqueID" or key:sub(-3) == "UID") then
-				part.self[key] = pac.Hash(base .. val)
+		if not part then return end
+		if istable(part.self) then
+			for key, val in pairs(part.self) do
+				if val ~= "" and (key == "UniqueID" or key:sub(-3) == "UID") then
+					part.self[key] = pac.Hash(base .. val)
+				end
 			end
 		end
 
-		for _, part in pairs(part.children) do
-			fixpart(part)
+		for _, child in pairs(part.children or {}) do
+			fixpart(child)
 		end
 	end
+
+	fixpart(part_data)
 
 	return part_data
 end
